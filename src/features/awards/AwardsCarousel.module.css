@@ -1,0 +1,93 @@
+.viewport {
+  --card-width: 240px;
+  --card-gap: 1rem;
+  --fade-width: 16%;
+
+  position: relative;
+  overflow: hidden;
+}
+
+.viewport::before,
+.viewport::after {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+
+  width: var(--fade-width);
+
+  content: '';
+  pointer-events: none;
+}
+
+.viewport::before {
+  left: 0;
+
+  background: linear-gradient(
+    to right,
+    var(--color-background) 0%,
+    color-mix(in srgb, var(--color-background) 85%, transparent) 35%,
+    transparent 100%
+  );
+}
+
+.viewport::after {
+  right: 0;
+
+  background: linear-gradient(
+    to left,
+    var(--color-background) 0%,
+    color-mix(in srgb, var(--color-background) 85%, transparent) 35%,
+    transparent 100%
+  );
+}
+
+.track {
+  display: flex;
+  width: max-content;
+  gap: var(--card-gap);
+
+  animation: marquee var(--marquee-duration) linear infinite;
+  will-change: transform;
+}
+
+.group {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--card-gap);
+}
+
+.item {
+  width: var(--card-width);
+  flex-shrink: 0;
+}
+
+@keyframes marquee {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    transform: translate3d(calc(-50% - (var(--card-gap) / 2)), 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    animation-play-state: paused;
+  }
+}
+
+@media (max-width: 1024px) {
+  .viewport {
+    --card-width: 150px;
+  }
+}
+
+@media (max-width: 640px) {
+  .viewport {
+    --card-width: 180px;
+    --card-gap: 0.75rem;
+    --fade-width: 22%;
+  }
+}
