@@ -23,7 +23,7 @@ export function AwardsCarousel({ speed = 90 }: AwardsCarouselProps) {
       </h2>
 
       <div className={styles.viewport}>
-        <div className={styles.track} style={animationStyle}>
+        <div className={styles.track} style={animationStyle} data-testid="awards-carousel-track">
           <AwardGroup ariaHidden={false} />
           <AwardGroup ariaHidden />
         </div>
@@ -38,7 +38,7 @@ interface AwardGroupProps {
 
 function AwardGroup({ ariaHidden }: AwardGroupProps) {
   return (
-    <div aria-hidden={ariaHidden} className={styles.group}>
+    <div aria-hidden={ariaHidden} className={styles.group} data-testid="awards-carousel-group">
       {awards.map((award) => (
         <article key={award.id} className="w-[var(--card-width)] shrink-0">
           <div className="bg-surface relative flex min-h-60 items-center justify-center overflow-hidden rounded-md max-[1024px]:min-h-[150px] max-[640px]:min-h-[190px]">
