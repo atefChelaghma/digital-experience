@@ -26,6 +26,8 @@ spec:
       terminationGracePeriodSeconds: 30
 
       securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault

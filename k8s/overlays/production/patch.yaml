@@ -5,4 +5,4 @@ metadata:
   name: my-website
 
 spec:
-  replicas: 1
+  replicas: 3
