@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: my-website
+
+spec:
+  replicas: 1
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  selector:
+    matchLabels:
+      app: my-website
+
+  template:
+    metadata:
+      labels:
+        app: my-website
+
+    spec:
+      terminationGracePeriodSeconds: 30
+
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: my-website
+          image: my-website:local
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+
+          env:
+            - name: NODE_ENV
+              value: production
+
+            - name: NEXT_TELEMETRY_DISABLED
+              value: '1'
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          startupProbe:
+            tcpSocket:
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
