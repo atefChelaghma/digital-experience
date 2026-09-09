@@ -170,7 +170,9 @@ jobs:
     if: github.event_name == 'push'
 
     outputs:
-      image: ${{ steps.image.outputs.image }}
+      image: ${{ steps.inspect.outputs.image }}
+      tag: ${{ steps.meta.outputs.version }}
+      digest: ${{ steps.inspect.outputs.digest }}
 
     steps:
       - name: Download image digests
@@ -206,19 +208,6 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
 
-      - name: Set image reference
-        id: image
-        run: |
-          IMAGE="ghcr.io/${{ env.IMAGE_NAME }}:sha-${GITHUB_SHA::7}"
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-
-      - name: Create multi-platform manifest
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s ' *)
-
       - name: Inspect final image
         id: inspect
         run: |
@@ -238,10 +227,12 @@ jobs:
       - name: Show final image
         run: |
           echo "Image: ${{ steps.inspect.outputs.image }}"
+          echo "Tag: ${{ steps.meta.outputs.version }}"
           echo "Digest: ${{ steps.inspect.outputs.digest }}"
 
-    update-gitops:
+  update-gitops:
     name: Update GitOps Dev
+
     runs-on: ubuntu-24.04
 
     needs:
@@ -260,13 +251,17 @@ jobs:
       - name: Update Dev image
         working-directory: gitops
         env:
-          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_TAG: ${{ needs.docker-merge.outputs.tag }}
         run: |
+          echo "Updating Dev to ${IMAGE_TAG}"
+
           sed -i "s/newTag: .*/newTag: ${IMAGE_TAG}/" \
             k8s/overlays/dev/kustomization.yaml
 
       - name: Validate Dev manifest
         working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ needs.docker-merge.outputs.tag }}
         run: |
           kubectl kustomize k8s/overlays/dev > /tmp/dev-manifest.yaml
 
@@ -277,7 +272,7 @@ jobs:
       - name: Commit and push GitOps change
         working-directory: gitops
         env:
-          IMAGE_TAG: sha-${{ github.sha }}
+          IMAGE_TAG: ${{ needs.docker-merge.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
