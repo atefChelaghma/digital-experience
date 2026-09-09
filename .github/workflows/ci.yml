@@ -159,7 +159,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  docker-merge:
+    docker-merge:
     name: Merge multi-platform image
 
     runs-on: ubuntu-24.04
@@ -171,7 +171,7 @@ jobs:
 
     outputs:
       image: ${{ steps.inspect.outputs.image }}
-      tag: ${{ steps.image.outputs.tag }}
+      tag: ${{ steps.inspect.outputs.tag }}
       digest: ${{ steps.inspect.outputs.digest }}
 
     steps:
@@ -210,24 +210,31 @@ jobs:
 
       - name: Inspect final image
         id: inspect
+        env:
+          IMAGE_NAME: ghcr.io/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: sha-${{ github.sha }}
         run: |
-          IMAGE="${{ steps.image.outputs.image }}"
+          IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 
-          docker buildx imagetools inspect "$IMAGE"
+          echo "Inspecting: ${IMAGE}"
 
-          DIGEST=$(docker buildx imagetools inspect "$IMAGE" \
+          docker buildx imagetools inspect "${IMAGE}"
+
+          DIGEST=$(docker buildx imagetools inspect "${IMAGE}" \
             --format '{{json .Manifest.Digest}}')
 
-          echo "IMAGE=$IMAGE"
-          echo "DIGEST=$DIGEST"
+          echo "IMAGE=${IMAGE}"
+          echo "TAG=${IMAGE_TAG}"
+          echo "DIGEST=${DIGEST}"
 
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
       - name: Show final image
         run: |
           echo "Image: ${{ steps.inspect.outputs.image }}"
-          echo "Tag: ${{ steps.meta.outputs.version }}"
+          echo "Tag: ${{ steps.inspect.outputs.tag }}"
           echo "Digest: ${{ steps.inspect.outputs.digest }}"
 
   update-gitops:
