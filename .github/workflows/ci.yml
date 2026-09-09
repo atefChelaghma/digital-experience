@@ -159,7 +159,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-    docker-merge:
+  docker-merge:
     name: Merge multi-platform image
 
     runs-on: ubuntu-24.04
