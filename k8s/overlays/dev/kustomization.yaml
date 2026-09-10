@@ -8,8 +8,3 @@ resources:
 
 patches:
   - path: patch.yaml
-
-images:
-  - name: my-website
-    newName: ghcr.io/atefchelaghma/digital-experience
-    newTag: sha-df899fa
