@@ -1,0 +1,109 @@
+name: Promote Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Docker image tag to promote
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/atefchelaghma/digital-experience
+
+jobs:
+  promote-preprod:
+    name: Promote to Preprod
+
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v7
+        with:
+          repository: atefChelaghma/pipe-gitops
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Validate image tag
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [[ ! "${IMAGE_TAG}" =~ ^sha-[a-f0-9]{7}$ ]]; then
+            echo "Invalid image tag: ${IMAGE_TAG}"
+            echo "Expected format: sha-1234567"
+            exit 1
+          fi
+
+          echo "Promoting: ${IMAGE_NAME}:${IMAGE_TAG}"
+
+      - name: Verify image exists
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          docker manifest inspect \
+            "${IMAGE_NAME}:${IMAGE_TAG}" > /dev/null
+
+          echo "Image exists in GHCR."
+
+      - name: Update Preprod image
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          cd k8s/overlays/preprod
+
+          kustomize edit set image \
+            my-website="${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "Updated Preprod:"
+          cat kustomization.yaml
+
+      - name: Validate Preprod manifest
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          EXPECTED="${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "Expected image:"
+          echo "${EXPECTED}"
+
+          echo ""
+          echo "Rendered image:"
+
+          kustomize build k8s/overlays/preprod |
+            grep "image:"
+
+          echo ""
+          echo "Checking image..."
+
+          kustomize build k8s/overlays/preprod |
+            grep -q "image: ${EXPECTED}"
+
+          echo "Preprod manifest validation passed."
+
+      - name: Commit and push
+        working-directory: gitops
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add k8s/overlays/preprod/kustomization.yaml
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git diff --cached
+
+          git commit \
+            -m "chore: promote ${IMAGE_TAG} to preprod"
+
+          git push origin main
