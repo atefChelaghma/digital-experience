@@ -1,5 +1,6 @@
 # Project
 
+Welcome
 Modern Next.js application built with TypeScript.
 
 ## Stack
