@@ -298,14 +298,15 @@ jobs:
           fi
 
           echo "Updating Dev to ${IMAGE_TAG}"
+          cd k8s/overlays/dev
 
-          sed -i \
-            "s/newTag: .*/newTag: ${IMAGE_TAG}/" \
-            k8s/overlays/dev/kustomization.yaml
+          # Usa kustomize standalone para editar a imagem
+          kustomize edit set image \
+            ghcr.io/atefchelaghma/digital-experience=ghcr.io/atefchelaghma/digital-experience:${IMAGE_TAG}
 
           echo ""
           echo "Updated Dev configuration:"
-          grep -A3 "images:" k8s/overlays/dev/kustomization.yaml
+          cat kustomization.yaml
 
       - name: Validate Dev manifest
         working-directory: gitops
