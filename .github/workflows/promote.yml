@@ -54,13 +54,46 @@ jobs:
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          cd k8s/overlays/preprod
+          set -e
 
-          kustomize edit set image \
-            my-website="${IMAGE_NAME}:${IMAGE_TAG}"
+          FILE="k8s/overlays/preprod/kustomization.yaml"
 
-          echo "Updated Preprod:"
-          cat kustomization.yaml
+          echo "IMAGE_TAG=${IMAGE_TAG}"
+          echo ""
+          echo "Before:"
+          cat "$FILE"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          path = Path("k8s/overlays/preprod/kustomization.yaml")
+          tag = os.environ["IMAGE_TAG"]
+
+          lines = path.read_text().splitlines()
+
+          found = False
+
+          for i, line in enumerate(lines):
+              if line.strip().startswith("newTag:"):
+                  indent = line[:len(line) - len(line.lstrip())]
+                  lines[i] = f"{indent}newTag: {tag}"
+                  found = True
+                  break
+
+          if not found:
+              raise SystemExit("ERROR: newTag not found")
+
+          path.write_text("\n".join(lines) + "\n")
+          PY
+
+          echo ""
+          echo "After:"
+          cat "$FILE"
+
+          echo ""
+          echo "Diff:"
+          git diff -- "$FILE"
 
       - name: Validate Preprod manifest
         working-directory: gitops
