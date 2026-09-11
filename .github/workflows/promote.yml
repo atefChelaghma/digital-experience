@@ -146,7 +146,7 @@ jobs:
 
           lines = file_path.read_text().splitlines()
 
-          target_name = "my-website"
+          target_name = "ghcr.io/atefchelaghma/digital-experience"
 
           inside_images = False
           target_image = False
@@ -161,26 +161,21 @@ jobs:
                   target_image = False
                   continue
 
-              # Detect another top-level section.
+              # Leave images section when another top-level
+              # Kustomization field starts.
               if inside_images and line and not line.startswith(" "):
                   inside_images = False
                   target_image = False
                   continue
 
-              # Find:
-              #
-              # - name: my-website
-              #
+              # Find the correct image
               if inside_images and stripped.startswith("- name:"):
                   target_image = (
-                      stripped == "- name: my-website"
+                      stripped == f"- name: {target_name}"
                   )
                   continue
 
-              # Update:
-              #
-              # newTag: sha-XXXXXXX
-              #
+              # Update the newTag belonging to that image
               if (
                   inside_images
                   and target_image
@@ -195,11 +190,9 @@ jobs:
 
           if not updated:
               print("")
-              print("ERROR: Could not find:")
+              print("ERROR: Could not find image:")
               print("")
-              print("images:")
-              print("  - name: my-website")
-              print("    newTag: ...")
+              print(f"  - name: {target_name}")
               print("")
               print("The file was NOT modified.")
               sys.exit(1)
