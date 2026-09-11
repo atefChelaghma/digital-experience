@@ -4,51 +4,106 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Docker image tag to promote
+        description: 'Docker image SHA tag to promote to Preprod (example: sha-9539ef7)'
         required: true
         type: string
 
 permissions:
   contents: read
+  packages: read
 
 env:
   IMAGE_NAME: ghcr.io/atefchelaghma/digital-experience
+  GITOPS_REPO: atefChelaghma/pipe-gitops
+  GITOPS_BRANCH: main
+  PREPROD_FILE: k8s/overlays/preprod/kustomization.yaml
 
 jobs:
   promote-preprod:
     name: Promote to Preprod
-
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout GitOps repository
-        uses: actions/checkout@v7
-        with:
-          repository: atefChelaghma/pipe-gitops
-          token: ${{ secrets.GITOPS_TOKEN }}
-          path: gitops
-
+      # ------------------------------------------------------------
+      # 1. Validate input
+      # ------------------------------------------------------------
       - name: Validate image tag
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
+          set -e
+
+          echo "Image tag: ${IMAGE_TAG}"
+
           if [[ ! "${IMAGE_TAG}" =~ ^sha-[a-f0-9]{7}$ ]]; then
-            echo "Invalid image tag: ${IMAGE_TAG}"
-            echo "Expected format: sha-1234567"
+            echo ""
+            echo "ERROR: Invalid image tag."
+            echo "Expected format: sha-XXXXXXX"
+            echo "Example: sha-9539ef7"
             exit 1
           fi
 
-          echo "Promoting: ${IMAGE_NAME}:${IMAGE_TAG}"
+          echo ""
+          echo "Image tag format is valid."
 
-            - name: Verify image exists
+      # ------------------------------------------------------------
+      # 2. Checkout GitOps repository
+      # ------------------------------------------------------------
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          ref: ${{ env.GITOPS_BRANCH }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+          fetch-depth: 0
+
+      # ------------------------------------------------------------
+      # 3. Show current Preprod configuration
+      # ------------------------------------------------------------
+      - name: Show current Preprod image
+        working-directory: gitops
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Current Preprod configuration"
+          echo "=========================================="
+          echo ""
+
+          cat "${PREPROD_FILE}"
+
+          echo ""
+          echo "=========================================="
+          echo "Current rendered image"
+          echo "=========================================="
+          echo ""
+
+          kustomize build k8s/overlays/preprod |
+            grep "image:" || true
+
+      # ------------------------------------------------------------
+      # 4. Verify image exists in GHCR
+      # ------------------------------------------------------------
+      - name: Verify image exists
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          docker manifest inspect \
-            "${IMAGE_NAME}:${IMAGE_TAG}" > /dev/null
+          set -e
+
+          IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "Checking image:"
+          echo "${IMAGE}"
+          echo ""
+
+          docker manifest inspect "${IMAGE}" > /dev/null
 
           echo "Image exists in GHCR."
 
+      # ------------------------------------------------------------
+      # 5. Update Preprod Kustomization
+      # ------------------------------------------------------------
       - name: Update Preprod image
         working-directory: gitops
         env:
@@ -56,101 +111,223 @@ jobs:
         run: |
           set -e
 
-          FILE="k8s/overlays/preprod/kustomization.yaml"
+          FILE="${PREPROD_FILE}"
 
-          echo "IMAGE_TAG=${IMAGE_TAG}"
+          echo "=========================================="
+          echo "Updating Preprod image"
+          echo "=========================================="
           echo ""
-          echo "Before:"
+
+          echo "Target image:"
+          echo "${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo ""
+          echo "File:"
+          echo "${FILE}"
+
+          echo ""
+          echo "------------------------------------------"
+          echo "BEFORE"
+          echo "------------------------------------------"
+
           cat "${FILE}"
 
-          python3 - <<'PY'
-          import os
+          echo ""
+          echo "------------------------------------------"
+          echo "Updating newTag"
+          echo "------------------------------------------"
+
+          python3 - "${FILE}" "${IMAGE_TAG}" <<'PY'
+          import sys
           from pathlib import Path
 
-          path = Path("k8s/overlays/preprod/kustomization.yaml")
-          new_tag = os.environ["IMAGE_TAG"]
+          file_path = Path(sys.argv[1])
+          new_tag = sys.argv[2]
 
-          lines = path.read_text().splitlines()
+          lines = file_path.read_text().splitlines()
+
+          target_name = "my-website"
 
           inside_images = False
           target_image = False
           updated = False
 
-          for i, line in enumerate(lines):
+          for index, line in enumerate(lines):
               stripped = line.strip()
 
+              # Enter images section
               if stripped == "images:":
                   inside_images = True
+                  target_image = False
                   continue
 
+              # Detect another top-level section.
+              if inside_images and line and not line.startswith(" "):
+                  inside_images = False
+                  target_image = False
+                  continue
+
+              # Find:
+              #
+              # - name: my-website
+              #
               if inside_images and stripped.startswith("- name:"):
-                  target_image = stripped == "- name: my-website"
+                  target_image = (
+                      stripped == "- name: my-website"
+                  )
                   continue
 
-              if inside_images and target_image and stripped.startswith("newTag:"):
+              # Update:
+              #
+              # newTag: sha-XXXXXXX
+              #
+              if (
+                  inside_images
+                  and target_image
+                  and stripped.startswith("newTag:")
+              ):
                   indent = line[:len(line) - len(line.lstrip())]
-                  lines[i] = f"{indent}newTag: {new_tag}"
+
+                  lines[index] = f"{indent}newTag: {new_tag}"
+
                   updated = True
                   break
 
           if not updated:
-              raise SystemExit(
-                  "ERROR: Could not find newTag for image 'my-website'"
-              )
+              print("")
+              print("ERROR: Could not find:")
+              print("")
+              print("images:")
+              print("  - name: my-website")
+              print("    newTag: ...")
+              print("")
+              print("The file was NOT modified.")
+              sys.exit(1)
 
-          path.write_text("\n".join(lines) + "\n")
+          file_path.write_text("\n".join(lines) + "\n")
+
+          print("")
+          print("Successfully updated Preprod image tag.")
           PY
 
           echo ""
-          echo "After:"
+          echo "------------------------------------------"
+          echo "AFTER"
+          echo "------------------------------------------"
+
           cat "${FILE}"
 
           echo ""
-          echo "Diff:"
+          echo "------------------------------------------"
+          echo "GIT DIFF"
+          echo "------------------------------------------"
+
           git diff -- "${FILE}"
 
+      # ------------------------------------------------------------
+      # 6. Validate that Kustomize renders the requested image
+      # ------------------------------------------------------------
       - name: Validate Preprod manifest
         working-directory: gitops
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
+          set -e
+
           EXPECTED="${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "=========================================="
+          echo "Validating Preprod manifest"
+          echo "=========================================="
+          echo ""
 
           echo "Expected image:"
           echo "${EXPECTED}"
 
           echo ""
-          echo "Rendered image:"
+          echo "Rendered images:"
+          echo "------------------------------------------"
 
-          kustomize build k8s/overlays/preprod |
-            grep "image:"
+          RENDERED="$(kustomize build k8s/overlays/preprod)"
+
+          echo "${RENDERED}" | grep "image:"
 
           echo ""
-          echo "Checking image..."
+          echo "------------------------------------------"
+          echo "Checking expected image"
+          echo "------------------------------------------"
 
-          kustomize build k8s/overlays/preprod |
-            grep -q "image: ${EXPECTED}"
+          if ! echo "${RENDERED}" | grep -Fq "image: ${EXPECTED}"; then
+            echo ""
+            echo "ERROR: Expected image was NOT found."
+            echo ""
+            echo "Expected:"
+            echo "${EXPECTED}"
+            echo ""
+            echo "Rendered:"
+            echo "${RENDERED}" | grep "image:" || true
+            exit 1
+          fi
 
-          echo "Preprod manifest validation passed."
+          echo ""
+          echo "Preprod manifest validation PASSED."
 
-      - name: Commit and push
+      # ------------------------------------------------------------
+      # 7. Show final GitOps diff
+      # ------------------------------------------------------------
+      - name: Show final diff
+        working-directory: gitops
+        run: |
+          set -e
+
+          echo "=========================================="
+          echo "Final GitOps diff"
+          echo "=========================================="
+          echo ""
+
+          git diff -- "${PREPROD_FILE}"
+
+      # ------------------------------------------------------------
+      # 8. Commit and push
+      # ------------------------------------------------------------
+      - name: Commit and push GitOps change
         working-directory: gitops
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
+          set -e
+
+          echo "=========================================="
+          echo "Committing GitOps change"
+          echo "=========================================="
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add k8s/overlays/preprod/kustomization.yaml
+          git add "${PREPROD_FILE}"
 
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo ""
+            echo "No changes detected."
+
+            CURRENT_IMAGE="$(kustomize build k8s/overlays/preprod | grep 'image:' | head -1)"
+
+            echo ""
+            echo "Current rendered image:"
+            echo "${CURRENT_IMAGE}"
+
             exit 0
           fi
 
-          git diff --cached
-
           git commit \
-            -m "chore: promote ${IMAGE_TAG} to preprod"
+            -m "chore(preprod): promote ${IMAGE_TAG}"
 
-          git push origin main
+          git push origin "${GITOPS_BRANCH}"
+
+          echo ""
+          echo "=========================================="
+          echo "Promotion completed"
+          echo "=========================================="
+          echo ""
+          echo "Preprod promoted to:"
+          echo "${IMAGE_NAME}:${IMAGE_TAG}"
