@@ -49,7 +49,7 @@ jobs:
 
           echo "Image exists in GHCR."
 
-      - name: Update Preprod image
+            - name: Update Preprod image
         working-directory: gitops
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
@@ -61,39 +61,53 @@ jobs:
           echo "IMAGE_TAG=${IMAGE_TAG}"
           echo ""
           echo "Before:"
-          cat "$FILE"
+          cat "${FILE}"
 
           python3 - <<'PY'
           import os
           from pathlib import Path
 
           path = Path("k8s/overlays/preprod/kustomization.yaml")
-          tag = os.environ["IMAGE_TAG"]
+          new_tag = os.environ["IMAGE_TAG"]
 
           lines = path.read_text().splitlines()
 
-          found = False
+          inside_images = False
+          target_image = False
+          updated = False
 
           for i, line in enumerate(lines):
-              if line.strip().startswith("newTag:"):
+              stripped = line.strip()
+
+              if stripped == "images:":
+                  inside_images = True
+                  continue
+
+              if inside_images and stripped.startswith("- name:"):
+                  target_image = stripped == "- name: my-website"
+                  continue
+
+              if inside_images and target_image and stripped.startswith("newTag:"):
                   indent = line[:len(line) - len(line.lstrip())]
-                  lines[i] = f"{indent}newTag: {tag}"
-                  found = True
+                  lines[i] = f"{indent}newTag: {new_tag}"
+                  updated = True
                   break
 
-          if not found:
-              raise SystemExit("ERROR: newTag not found")
+          if not updated:
+              raise SystemExit(
+                  "ERROR: Could not find newTag for image 'my-website'"
+              )
 
           path.write_text("\n".join(lines) + "\n")
           PY
 
           echo ""
           echo "After:"
-          cat "$FILE"
+          cat "${FILE}"
 
           echo ""
           echo "Diff:"
-          git diff -- "$FILE"
+          git diff -- "${FILE}"
 
       - name: Validate Preprod manifest
         working-directory: gitops
