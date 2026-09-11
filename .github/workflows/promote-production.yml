@@ -20,14 +20,18 @@ env:
   PRODUCTION_FILE: k8s/overlays/production/kustomization.yaml
 
 jobs:
-  promote-production:
-    name: Promote Preprod image to Production
+  # ================================================================
+  # 1. Validate promotion
+  # ================================================================
+
+  validate:
+    name: Validate Production Promotion
     runs-on: ubuntu-24.04
 
     steps:
-      # ============================================================
-      # 1. Validate input
-      # ============================================================
+      # ------------------------------------------------------------
+      # Validate SHA format
+      # ------------------------------------------------------------
 
       - name: Validate image tag
         env:
@@ -47,20 +51,21 @@ jobs:
             echo ""
             echo "ERROR: Invalid image tag."
             echo ""
-            echo "Expected format:"
+            echo "Expected:"
             echo "sha-XXXXXXX"
             echo ""
             echo "Example:"
             echo "sha-000f5af"
+
             exit 1
           fi
 
           echo ""
           echo "Image tag format is valid."
 
-      # ============================================================
-      # 2. Checkout GitOps repository
-      # ============================================================
+      # ------------------------------------------------------------
+      # Checkout GitOps repository
+      # ------------------------------------------------------------
 
       - name: Checkout GitOps repository
         uses: actions/checkout@v5
@@ -71,42 +76,32 @@ jobs:
           path: gitops
           fetch-depth: 0
 
-      # ============================================================
-      # 3. Show current GitOps state
-      # ============================================================
+      # ------------------------------------------------------------
+      # Show GitOps state
+      # ------------------------------------------------------------
 
-      - name: Show current GitOps state
+      - name: Show GitOps state
         working-directory: gitops
         run: |
           set -e
 
           echo "=========================================="
-          echo "Current GitOps state"
+          echo "GitOps state"
           echo "=========================================="
-          echo ""
 
+          echo ""
           echo "----- PREPROD -----"
+
           cat "${PREPROD_FILE}"
 
           echo ""
           echo "----- PRODUCTION -----"
+
           cat "${PRODUCTION_FILE}"
 
-          echo ""
-          echo "----- PREPROD RENDERED IMAGE -----"
-
-          kustomize build k8s/overlays/preprod |
-            grep "image:" || true
-
-          echo ""
-          echo "----- PRODUCTION RENDERED IMAGE -----"
-
-          kustomize build k8s/overlays/production |
-            grep "image:" || true
-
-      # ============================================================
-      # 4. Verify Preprod contains requested SHA
-      # ============================================================
+      # ------------------------------------------------------------
+      # Verify Preprod uses requested SHA
+      # ------------------------------------------------------------
 
       - name: Verify Preprod image
         working-directory: gitops
@@ -118,15 +113,15 @@ jobs:
           EXPECTED="${IMAGE_NAME}:${IMAGE_TAG}"
 
           echo "=========================================="
-          echo "Verifying Preprod image"
+          echo "Verifying Preprod"
           echo "=========================================="
-          echo ""
 
+          echo ""
           echo "Expected:"
           echo "${EXPECTED}"
 
           echo ""
-          echo "Preprod rendered image:"
+          echo "Rendered Preprod image:"
 
           kustomize build k8s/overlays/preprod |
             grep "image:"
@@ -138,12 +133,15 @@ jobs:
               grep -Fq "image: ${EXPECTED}"; then
 
             echo ""
-            echo "ERROR: Preprod does not contain the requested image."
+            echo "ERROR: Preprod does not contain requested image."
+
             echo ""
             echo "Requested:"
             echo "${EXPECTED}"
+
             echo ""
-            echo "Preprod currently contains:"
+            echo "Current Preprod image:"
+
             kustomize build k8s/overlays/preprod |
               grep "image:" || true
 
@@ -151,11 +149,11 @@ jobs:
           fi
 
           echo ""
-          echo "Preprod image verification PASSED."
+          echo "Preprod verification PASSED."
 
-      # ============================================================
-      # 5. Verify image exists in GHCR
-      # ============================================================
+      # ------------------------------------------------------------
+      # Verify GHCR image
+      # ------------------------------------------------------------
 
       - name: Verify image exists in GHCR
         env:
@@ -168,8 +166,8 @@ jobs:
           echo "=========================================="
           echo "Verifying GHCR image"
           echo "=========================================="
-          echo ""
 
+          echo ""
           echo "Image:"
           echo "${IMAGE}"
 
@@ -178,9 +176,45 @@ jobs:
           echo ""
           echo "GHCR image exists."
 
-      # ============================================================
-      # 6. Update Production image
-      # ============================================================
+  # ================================================================
+  # 2. Production deployment
+  #
+  # IMPORTANT:
+  #
+  # The "production" environment is protected by GitHub.
+  #
+  # GitHub will pause this job until an authorized reviewer
+  # approves the deployment.
+  # ================================================================
+
+  deploy:
+    name: Deploy to Production
+
+    needs:
+      - validate
+
+    runs-on: ubuntu-24.04
+
+    environment:
+      name: production
+
+    steps:
+      # ------------------------------------------------------------
+      # Checkout GitOps
+      # ------------------------------------------------------------
+
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          ref: ${{ env.GITOPS_BRANCH }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+          fetch-depth: 0
+
+      # ------------------------------------------------------------
+      # Update Production image
+      # ------------------------------------------------------------
 
       - name: Update Production image
         working-directory: gitops
@@ -190,18 +224,16 @@ jobs:
           set -e
 
           FILE="${PRODUCTION_FILE}"
-          TARGET_IMAGE="${IMAGE_NAME}"
+
+          TARGET_NAME="my-website"
 
           echo "=========================================="
           echo "Updating Production image"
           echo "=========================================="
+
           echo ""
-
-          echo "Target image:"
-          echo "${TARGET_IMAGE}"
-
-          echo "Target tag:"
-          echo "${IMAGE_TAG}"
+          echo "Target:"
+          echo "${IMAGE_NAME}:${IMAGE_TAG}"
 
           echo ""
           echo "File:"
@@ -219,23 +251,24 @@ jobs:
           echo "Updating newTag"
           echo "------------------------------------------"
 
-          python3 - "${FILE}" "${TARGET_IMAGE}" "${IMAGE_TAG}" <<'PY'
+          python3 - "${FILE}" "${TARGET_NAME}" "${IMAGE_TAG}" <<'PY'
           import sys
           from pathlib import Path
 
           file_path = Path(sys.argv[1])
-          target_image = sys.argv[2]
+          target_name = sys.argv[2]
           new_tag = sys.argv[3]
 
           lines = file_path.read_text().splitlines()
 
-          target_line = f"- name: {target_image}"
+          target_line = f"- name: {target_name}"
 
           image_index = None
           tag_index = None
 
-          # Find exact image
+          # Find target image
           for index, line in enumerate(lines):
+
               if line.strip() == target_line:
                   image_index = index
                   break
@@ -249,18 +282,24 @@ jobs:
               print("")
               sys.exit(1)
 
-          print(f"Found target image at line {image_index + 1}")
+          print(
+              f"Found target image at line {image_index + 1}"
+          )
 
           # Find newTag belonging to this image
-          for index in range(image_index + 1, len(lines)):
+          for index in range(
+              image_index + 1,
+              len(lines)
+          ):
 
               stripped = lines[index].strip()
 
-              # Stop if another image starts
+              # Another image entry
               if stripped.startswith("- name:"):
                   break
 
               if stripped.startswith("newTag:"):
+
                   tag_index = index
                   break
 
@@ -270,23 +309,31 @@ jobs:
               print("")
               sys.exit(1)
 
-          old_tag = lines[tag_index].split(":", 1)[1].strip()
+          old_tag = lines[tag_index].split(
+              ":",
+              1
+          )[1].strip()
 
           indent = lines[tag_index][
-              :len(lines[tag_index]) - len(lines[tag_index].lstrip())
+              :len(lines[tag_index])
+              - len(lines[tag_index].lstrip())
           ]
 
           print(f"Current tag: {old_tag}")
           print(f"New tag:     {new_tag}")
 
-          lines[tag_index] = f"{indent}newTag: {new_tag}"
+          lines[tag_index] = (
+              f"{indent}newTag: {new_tag}"
+          )
 
           file_path.write_text(
               "\n".join(lines) + "\n"
           )
 
           print("")
-          print("Successfully updated Production image tag.")
+          print(
+              "Successfully updated Production image tag."
+          )
           PY
 
           echo ""
@@ -303,9 +350,9 @@ jobs:
 
           git diff -- "${FILE}"
 
-      # ============================================================
-      # 7. Validate Production manifest
-      # ============================================================
+      # ------------------------------------------------------------
+      # Validate Production manifest
+      # ------------------------------------------------------------
 
       - name: Validate Production manifest
         working-directory: gitops
@@ -319,32 +366,33 @@ jobs:
           echo "=========================================="
           echo "Validating Production manifest"
           echo "=========================================="
-          echo ""
 
-          echo "Expected image:"
+          echo ""
+          echo "Expected:"
           echo "${EXPECTED}"
 
           echo ""
-          echo "Rendered images:"
-          echo "------------------------------------------"
+          echo "Rendered image:"
 
-          RENDERED="$(kustomize build k8s/overlays/production)"
+          RENDERED="$(
+            kustomize build k8s/overlays/production
+          )"
 
           echo "${RENDERED}" | grep "image:"
 
           echo ""
-          echo "------------------------------------------"
-          echo "Checking expected image"
-          echo "------------------------------------------"
+          echo "Checking..."
 
           if ! echo "${RENDERED}" |
               grep -Fq "image: ${EXPECTED}"; then
 
             echo ""
-            echo "ERROR: Expected image was NOT found."
+            echo "ERROR: Expected image was not found."
+
             echo ""
             echo "Expected:"
             echo "${EXPECTED}"
+
             echo ""
             echo "Rendered:"
             echo "${RENDERED}" |
@@ -354,11 +402,11 @@ jobs:
           fi
 
           echo ""
-          echo "Production manifest validation PASSED."
+          echo "Production image validation PASSED."
 
-      # ============================================================
-      # 8. Validate Production has 3 replicas
-      # ============================================================
+      # ------------------------------------------------------------
+      # Validate replicas
+      # ------------------------------------------------------------
 
       - name: Validate Production replicas
         working-directory: gitops
@@ -368,44 +416,31 @@ jobs:
           echo "=========================================="
           echo "Validating Production replicas"
           echo "=========================================="
-          echo ""
 
-          RENDERED="$(kustomize build k8s/overlays/production)"
+          RENDERED="$(
+            kustomize build k8s/overlays/production
+          )"
 
           echo "${RENDERED}" |
-            grep -A5 -B2 "kind: Deployment"
+            grep -A10 "name: my-website"
 
           echo ""
 
           if ! echo "${RENDERED}" |
-              grep -A10 "name: my-website" |
               grep -q "replicas: 3"; then
 
-            echo "ERROR: Production deployment does not have 3 replicas."
+            echo ""
+            echo "ERROR: Production does not have 3 replicas."
+
             exit 1
           fi
 
+          echo ""
           echo "Production replica validation PASSED."
 
-      # ============================================================
-      # 9. Show final diff
-      # ============================================================
-
-      - name: Show final GitOps diff
-        working-directory: gitops
-        run: |
-          set -e
-
-          echo "=========================================="
-          echo "Final GitOps diff"
-          echo "=========================================="
-          echo ""
-
-          git diff -- "${PRODUCTION_FILE}"
-
-      # ============================================================
-      # 10. Commit and push
-      # ============================================================
+      # ------------------------------------------------------------
+      # Commit and push GitOps
+      # ------------------------------------------------------------
 
       - name: Commit and push Production promotion
         working-directory: gitops
@@ -419,13 +454,17 @@ jobs:
           echo "=========================================="
 
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add "${PRODUCTION_FILE}"
 
           if git diff --cached --quiet; then
+
             echo ""
             echo "No Production changes detected."
+
             exit 0
           fi
 
@@ -438,7 +477,7 @@ jobs:
           echo "=========================================="
           echo "Production promotion completed"
           echo "=========================================="
-          echo ""
 
+          echo ""
           echo "Promoted image:"
           echo "${IMAGE_NAME}:${IMAGE_TAG}"
