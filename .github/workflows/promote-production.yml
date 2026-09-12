@@ -225,8 +225,6 @@ jobs:
 
           FILE="${PRODUCTION_FILE}"
 
-          TARGET_NAME="my-website"
-
           echo "=========================================="
           echo "Updating Production image"
           echo "=========================================="
@@ -248,93 +246,11 @@ jobs:
 
           echo ""
           echo "------------------------------------------"
-          echo "Updating newTag"
+          echo "Running Kustomize"
           echo "------------------------------------------"
 
-          python3 - "${FILE}" "${TARGET_NAME}" "${IMAGE_TAG}" <<'PY'
-          import sys
-          from pathlib import Path
-
-          file_path = Path(sys.argv[1])
-          target_name = sys.argv[2]
-          new_tag = sys.argv[3]
-
-          lines = file_path.read_text().splitlines()
-
-          target_line = f"- name: {target_name}"
-
-          image_index = None
-          tag_index = None
-
-          # Find target image
-          for index, line in enumerate(lines):
-
-              if line.strip() == target_line:
-                  image_index = index
-                  break
-
-          if image_index is None:
-              print("")
-              print("ERROR: Target image was not found.")
-              print("")
-              print(f"Looking for:")
-              print(f"  {target_line}")
-              print("")
-              sys.exit(1)
-
-          print(
-              f"Found target image at line {image_index + 1}"
-          )
-
-          # Find newTag belonging to this image
-          for index in range(
-              image_index + 1,
-              len(lines)
-          ):
-
-              stripped = lines[index].strip()
-
-              # Another image entry
-              if stripped.startswith("- name:"):
-                  break
-
-              if stripped.startswith("newTag:"):
-
-                  tag_index = index
-                  break
-
-          if tag_index is None:
-              print("")
-              print("ERROR: newTag was not found.")
-              print("")
-              sys.exit(1)
-
-          old_tag = lines[tag_index].split(
-              ":",
-              1
-          )[1].strip()
-
-          indent = lines[tag_index][
-              :len(lines[tag_index])
-              - len(lines[tag_index].lstrip())
-          ]
-
-          print(f"Current tag: {old_tag}")
-          print(f"New tag:     {new_tag}")
-
-          lines[tag_index] = (
-              f"{indent}newTag: {new_tag}"
-          )
-
-          file_path.write_text(
-              "\n".join(lines) + "\n"
-          )
-
-          print("")
-          print(
-              "Successfully updated Production image tag."
-          )
-          PY
+          kustomize edit set image \
+            "${IMAGE_NAME}=${IMAGE_NAME}:${IMAGE_TAG}"
 
           echo ""
           echo "------------------------------------------"
@@ -349,7 +265,6 @@ jobs:
           echo "------------------------------------------"
 
           git diff -- "${FILE}"
-
       # ------------------------------------------------------------
       # Validate Production manifest
       # ------------------------------------------------------------
