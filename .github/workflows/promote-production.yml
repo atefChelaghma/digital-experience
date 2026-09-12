@@ -249,8 +249,12 @@ jobs:
           echo "Running Kustomize"
           echo "------------------------------------------"
 
+          cd "$(dirname "${FILE}")"
+
           kustomize edit set image \
             "${IMAGE_NAME}=${IMAGE_NAME}:${IMAGE_TAG}"
+
+          cd - > /dev/null
 
           echo ""
           echo "------------------------------------------"
